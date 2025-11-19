@@ -1,3 +1,25 @@
 <resources>
-    <string name="app_name">oauth2demo</string>
+    <string name="app_name">DHIS2 OAuth2 Demo</string>
+    
+    <!-- Welcome Screen -->
+    <string name="welcome_title">Welcome to DHIS2</string>
+    <string name="welcome_subtitle">Register your device to get started with secure OAuth2 authentication</string>
+    <string name="server_url_hint">DHIS2 Server URL</string>
+    <string name="register_device_button">Register Device</string>
+    <string name="login_button">Login</string>
+    
+    <!-- Login Screen -->
+    <string name="login_title">Login to DHIS2</string>
+    <string name="login_with_dhis2_button">Login with DHIS2</string>
+    <string name="device_info_label">Device Information</string>
+    
+    <!-- Main Screen -->
+    <string name="main_title">Dashboard</string>
+    <string name="user_info_label">User Information</string>
+    <string name="access_token_label">Access Token</string>
+    <string name="logout_button">Logout</string>
+    <string name="reset_registration_button">Reset Device</string>
+    
+    <!-- Enrollment Screen -->
+    <string name="processing_enrollment">Processing device enrollment…</string>
 </resources>

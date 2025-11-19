@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -10,16 +12,45 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Oauth2demo">
+        android:theme="@style/Theme.Oauth2demo"
+        android:usesCleartextTraffic="true"
+        tools:targetApi="m">
+        
+        <!-- Welcome screen - First launch -->
         <activity
-            android:name=".MainActivity"
-            android:exported="true">
+            android:name=".ui.WelcomeActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        
+        <!-- Enrollment callback - Captures IAT from DHIS2 redirect -->
+        <activity
+            android:name=".ui.EnrollmentActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="dhis2oauth"
+                    android:host="oauth" />
+            </intent-filter>
+        </activity>
+        
+        <!-- Login screen -->
+        <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false" />
+        
+        <!-- Main screen - After successful login -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
     </application>
 
 </manifest>

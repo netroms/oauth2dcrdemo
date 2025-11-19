@@ -1,0 +1,498 @@
+===================================================================================
+ANDROID DHIS2 DCR OAUTH2 DEMO - IMPLEMENTATION SUMMARY
+===================================================================================
+
+PROJECT: DHIS2 Android OAuth2 Dynamic Client Registration Demo
+DATE: November 19, 2025
+AUTHOR: AI Assistant (Claude Sonnet 4.5)
+PURPOSE: Demonstrate DHIS2 Android DCR feature from PR #22183
+
+===================================================================================
+OVERVIEW
+===================================================================================
+
+This Android application demonstrates the complete OAuth2 Dynamic Client 
+Registration (DCR) flow with private_key_jwt authentication for DHIS2, as 
+implemented in PR: https://github.com/dhis2/dhis2-core/pull/22183
+
+The app implements the full flow:
+1. Device enrollment with DHIS2 server
+2. Retrieval of Initial Access Token (IAT) 
+3. RSA key pair generation on device
+4. Dynamic client registration with inline JWKS
+5. OAuth2 authorization code flow
+6. Token exchange using private_key_jwt authentication
+7. Authenticated API calls to DHIS2
+
+===================================================================================
+IMPLEMENTATION DETAILS
+===================================================================================
+
+### 1. DEPENDENCIES ADDED (gradle/libs.versions.toml & app/build.gradle.kts)
+
+- OkHttp 4.12.0: HTTP client for API requests
+- Nimbus JOSE+JWT 9.37.3: JWT creation, signing, and JWKS handling
+- AndroidX Security Crypto 1.1.0: Encrypted SharedPreferences for secure storage
+- Kotlin Coroutines 1.7.3: Asynchronous operations
+- AndroidX Browser 1.8.0: Custom Tabs for OAuth flows
+- Lifecycle components 2.7.0: ViewModel and lifecycle awareness
+- View Binding: Enabled for type-safe view access
+
+### 2. ANDROID MANIFEST CHANGES (AndroidManifest.xml)
+
+Added:
+- Internet permission
+- Cleartext traffic support (for testing with http servers)
+- Deep link intent filter for OAuth callbacks (dhis2oauth://oauth)
+- Activity declarations for WelcomeActivity, EnrollmentActivity, LoginActivity
+- Updated MainActivity to non-exported
+
+### 3. STORAGE LAYER
+
+**SecureStorage.kt**
+- Uses EncryptedSharedPreferences with AES256-GCM encryption
+- Stores:
+  * Server URL
+  * Client ID (from DCR registration)
+  * Key ID (kid)
+  * Access token
+  * Refresh token
+  * Token expiration timestamp
+  * Registration status
+- Provides methods for clearing tokens (logout) and complete reset
+
+**KeyStoreManager.kt**
+- Manages RSA key pairs in Android KeyStore
+- Generates 2048-bit RSA keys
+- Keys never leave the device (hardware-backed when available)
+- Creates JWKS JSON for DCR registration (public key only)
+- Creates RSAKey objects for JWT signing (includes private key)
+- Supports key deletion for cleanup
+
+### 4. JWT & CRYPTO HELPERS
+
+**JWTHelper.kt**
+- Creates private_key_jwt client assertions per RFC 7523
+- JWT claims: iss=clientId, sub=clientId, aud=tokenEndpoint, exp, iat, jti
+- Signs JWTs using RS256 with device's private key
+- Validates received JWTs (IAT from DHIS2)
+- Generates random state parameters for CSRF protection
+
+### 5. NETWORK LAYER
+
+**Models.kt**
+- ClientRegistrationRequest: DCR request with inline JWKS
+- ClientRegistrationResponse: Contains client_id
+- TokenResponse: Access token, refresh token, expires_in
+- UserInfo: User data from /api/me
+- ApiResult: Sealed class for Success/Error/NetworkError
+
+**DHIS2ApiClient.kt**
+- registerClient(): POST /connect/register with IAT bearer token
+- exchangeCodeForToken(): POST /oauth2/token with private_key_jwt
+- refreshToken(): POST /oauth2/token with refresh_token grant
+- getUserInfo(): GET /api/me with access token
+- testServerConnection(): GET /api/system/info for validation
+
+### 6. DCR & OAUTH2 MANAGERS
+
+**DCRManager.kt**
+- Builds enrollment URL: /api/auth/enrollDevice with device parameters
+- Processes IAT from enrollment callback
+- Generates RSA key pair
+- Creates JWKS from public key
+- Registers client with DHIS2 via /connect/register
+- Stores registration data (client_id, key_id, server_url)
+- Provides registration reset functionality
+
+**OAuth2Manager.kt**
+- Builds authorization URL: /oauth/authorize
+- Exchanges authorization code for tokens
+- Creates private_key_jwt client assertions for token requests
+- Refreshes access tokens when expired
+- Fetches user info from /api/me
+- Manages logout (clears tokens, preserves registration)
+
+### 7. USER INTERFACE
+
+**WelcomeActivity**
+- First screen shown on app launch
+- Server URL input (pre-filled with https://play.dhis2.org/dev)
+- "Register Device" button
+- Tests server connectivity before enrollment
+- Opens enrollment URL in Custom Tab (browser)
+- Shows "Login" button if already registered
+
+**EnrollmentActivity**
+- Triggered by deep link: dhis2oauth://oauth?iat=...&state=...
+- Extracts IAT and state from URL
+- Validates state (CSRF protection)
+- Calls DCRManager to register device
+- Shows progress indicator
+- Navigates to LoginActivity on success
+
+**LoginActivity**
+- Displays device info (server URL, client ID)
+- "Login with DHIS2" button
+- Opens authorization URL in Custom Tab
+- Captures OAuth callback with authorization code
+- Validates state (CSRF protection)
+- Exchanges code for token using private_key_jwt
+- Navigates to MainActivity on success
+
+**MainActivity**
+- Post-login dashboard
+- Displays user information (username, display name, email)
+- Shows truncated access token
+- Shows device info (server URL, client ID)
+- "Logout" button (clears tokens, keeps registration)
+- "Reset Device" button (full cleanup with confirmation dialog)
+- Fetches user info from /api/me on load
+
+===================================================================================
+KEY SECURITY FEATURES
+===================================================================================
+
+1. **Private Key Protection**
+   - RSA private keys stored in Android KeyStore
+   - Keys never leave the device
+   - Hardware-backed when available (TEE/Secure Enclave)
+
+2. **Encrypted Storage**
+   - EncryptedSharedPreferences with AES256-GCM
+   - Master key in KeyStore
+   - Protects client_id, tokens, and configuration
+
+3. **CSRF Protection**
+   - Random state parameter in OAuth flows
+   - State validation on callbacks
+
+4. **Token Security**
+   - Short-lived IAT (60 seconds)
+   - Access token expiration tracking
+   - Automatic token refresh
+
+5. **TLS/HTTPS**
+   - All API communication over HTTPS (production)
+   - Cleartext traffic allowed only for testing
+
+===================================================================================
+OAUTH2 FLOW DETAILS
+===================================================================================
+
+### ENROLLMENT FLOW:
+
+1. User enters DHIS2 server URL
+2. App opens: {server}/api/auth/enrollDevice?deviceVersion=...&deviceType=android&...
+3. User authenticates in browser
+4. DHIS2 redirects: dhis2oauth://oauth?iat={JWT}&state={state}
+5. App validates state and IAT
+6. App generates RSA key pair
+7. App registers client: POST /connect/register with IAT bearer token
+   Body: {
+     "client_name": "DHIS2 Android Demo - {deviceId}",
+     "redirect_uris": ["dhis2oauth://oauth"],
+     "grant_types": ["authorization_code", "refresh_token"],
+     "token_endpoint_auth_method": "private_key_jwt",
+     "token_endpoint_auth_signing_alg": "RS256",
+     "jwks": {inline JWKS with public key}
+   }
+8. DHIS2 returns client_id
+9. App stores: client_id, key_id, server_url
+
+### LOGIN FLOW:
+
+1. User clicks "Login with DHIS2"
+2. App opens: {server}/oauth/authorize?client_id=...&redirect_uri=...&response_type=code&...
+3. User authenticates in browser
+4. DHIS2 redirects: dhis2oauth://oauth?code={authCode}&state={state}
+5. App validates state
+6. App creates JWT client assertion:
+   - Header: {alg: "RS256", kid: {keyId}}
+   - Claims: {iss: clientId, sub: clientId, aud: tokenEndpoint, exp, iat, jti}
+   - Signed with device's private key
+7. App exchanges code: POST /oauth2/token
+   Body (form-urlencoded):
+     grant_type=authorization_code
+     code={authCode}
+     redirect_uri=dhis2oauth://oauth
+     client_id={clientId}
+     client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+     client_assertion={signedJWT}
+8. DHIS2 validates JWT signature using registered JWKS
+9. DHIS2 returns access_token, refresh_token, expires_in
+10. App stores tokens securely
+
+### API ACCESS:
+
+1. App checks token expiration
+2. If expired, refresh using refresh_token + private_key_jwt
+3. Make API call with: Authorization: Bearer {accessToken}
+4. Example: GET /api/me returns user information
+
+===================================================================================
+FILE STRUCTURE
+===================================================================================
+
+app/src/main/java/com/example/oauth2demo/
+├── MainActivity.kt (Dashboard after login)
+├── ui/
+│   ├── WelcomeActivity.kt (Entry point, server URL input)
+│   ├── EnrollmentActivity.kt (IAT callback handler)
+│   └── LoginActivity.kt (OAuth login flow)
+├── oauth/
+│   ├── DCRManager.kt (Device registration logic)
+│   ├── OAuth2Manager.kt (OAuth2 flow logic)
+│   └── JWTHelper.kt (JWT creation and validation)
+├── storage/
+│   ├── SecureStorage.kt (Encrypted SharedPreferences)
+│   └── KeyStoreManager.kt (RSA key management)
+└── network/
+    ├── DHIS2ApiClient.kt (HTTP client)
+    └── models/
+        └── Models.kt (Data classes)
+
+app/src/main/res/
+├── layout/
+│   ├── activity_welcome.xml
+│   ├── activity_enrollment.xml
+│   ├── activity_login.xml
+│   └── activity_main.xml
+└── values/
+    └── strings.xml
+
+===================================================================================
+TESTING INSTRUCTIONS
+===================================================================================
+
+### Prerequisites:
+1. DHIS2 server with DCR feature enabled (PR #22183 merged)
+2. Android device or emulator (API 33+)
+3. Server configured with:
+   - deviceEnrollmentRedirectAllowlist containing: dhis2oauth://oauth
+   - deviceEnrollmentAllowedUserGroups (optional, for access control)
+   - deviceEnrollmentIATTtlSeconds (default: 60 seconds)
+
+### Testing Steps:
+
+1. **Install and Launch App**
+   - App opens on WelcomeActivity
+
+2. **Enter Server URL**
+   - Enter: https://play.dhis2.org/dev (or your DHIS2 server)
+   - Click "Register Device"
+
+3. **Device Enrollment**
+   - Browser opens to DHIS2 login page
+   - Login with DHIS2 credentials
+   - Browser redirects back to app
+   - App shows "Device registered successfully!"
+   - Navigates to LoginActivity
+
+4. **Login**
+   - View device info (server URL, client ID)
+   - Click "Login with DHIS2"
+   - Browser opens to DHIS2 authorization page
+   - Approve/Login
+   - Browser redirects back to app
+   - App shows "Login successful!"
+   - Navigates to MainActivity
+
+5. **View Dashboard**
+   - User information displayed (username, display name, email)
+   - Access token shown (truncated)
+   - Device information shown
+
+6. **Test Logout**
+   - Click "Logout"
+   - Returns to WelcomeActivity
+   - Registration preserved, can login again
+
+7. **Test Reset**
+   - Login again
+   - Click "Reset Device"
+   - Confirm dialog
+   - All data cleared
+   - Returns to WelcomeActivity
+   - Must register again
+
+### Expected Behavior:
+
+✅ Server connection test passes
+✅ Browser opens for enrollment
+✅ IAT received and validated
+✅ Client registration succeeds
+✅ Client ID stored
+✅ Browser opens for login
+✅ Authorization code received
+✅ Token exchange succeeds using private_key_jwt
+✅ User info loaded from /api/me
+✅ Logout clears tokens only
+✅ Reset clears everything
+
+===================================================================================
+TROUBLESHOOTING
+===================================================================================
+
+**Issue: "Cannot connect to server"**
+- Solution: Check server URL format (must start with http:// or https://)
+- Solution: Ensure server is reachable from device/emulator
+
+**Issue: "Invalid or expired IAT"**
+- Solution: IAT expires in 60 seconds, retry enrollment
+- Solution: Check server system settings for IAT TTL
+
+**Issue: "Registration failed: 401 Unauthorized"**
+- Solution: IAT already used (can only be used once)
+- Solution: Restart enrollment process
+
+**Issue: "Token exchange failed"**
+- Solution: Check private_key_jwt signature generation
+- Solution: Verify JWKS was correctly registered
+- Solution: Check token endpoint logs on server
+
+**Issue: "Failed to load user info"**
+- Solution: Check access token validity
+- Solution: Verify OAuth scopes include required permissions
+- Solution: Check /api/me endpoint accessibility
+
+**Issue: Deep link not working**
+- Solution: Verify AndroidManifest.xml has correct intent filter
+- Solution: Check redirect URI matches: dhis2oauth://oauth
+- Solution: Restart app and try again
+
+===================================================================================
+DHIS2 PR REFERENCE
+===================================================================================
+
+This implementation is based on DHIS2 Core PR #22183:
+https://github.com/dhis2/dhis2-core/pull/22183
+
+Key endpoints implemented from the PR:
+
+1. **/api/auth/enrollDevice** (GET)
+   - Query params: deviceVersion, deviceType, deviceAttestation, redirectUri, state
+   - Requires user authentication (Basic/session)
+   - Returns: redirect to redirectUri with iat={JWT}&state={state}
+
+2. **/connect/register** (POST)
+   - Headers: Authorization: Bearer {iat}
+   - Body: ClientRegistrationRequest (JSON with inline JWKS)
+   - Returns: ClientRegistrationResponse (JSON with client_id)
+
+3. **/oauth/authorize** (GET)
+   - Standard OAuth2 authorization endpoint
+   - Query params: client_id, redirect_uri, response_type, scope, state
+
+4. **/oauth2/token** (POST)
+   - Body (form): grant_type, code/refresh_token, client_id, 
+                  client_assertion_type, client_assertion
+   - client_assertion: JWT signed with private key
+   - Returns: access_token, refresh_token, expires_in
+
+5. **/api/me** (GET)
+   - Headers: Authorization: Bearer {accessToken}
+   - Returns: User information (id, username, displayName, email)
+
+===================================================================================
+IMPORTANT NOTES
+===================================================================================
+
+1. **Production Considerations**:
+   - Remove android:usesCleartextTraffic="true" for production
+   - Implement certificate pinning for additional security
+   - Add proper error handling and user feedback
+   - Implement token refresh background job
+   - Add biometric authentication for sensitive operations
+
+2. **Key Management**:
+   - Keys are unique per device
+   - Keys cannot be exported or backed up
+   - Device reset requires new registration
+   - Consider key rotation strategy for production
+
+3. **OAuth Scopes**:
+   - Current implementation uses: "openid profile"
+   - Adjust scopes based on required API access
+   - Server must support requested scopes
+
+4. **Deep Link Security**:
+   - App Linking (https://) preferred over custom scheme for production
+   - Requires server to host assetlinks.json
+   - Prevents other apps from intercepting callbacks
+
+5. **Testing with Local Server**:
+   - Use 10.0.2.2 for emulator to access localhost
+   - Use actual IP address for physical devices
+   - Ensure firewall allows connections
+
+===================================================================================
+RATIONALE & DESIGN DECISIONS
+===================================================================================
+
+1. **Why Android KeyStore?**
+   - Hardware-backed security when available
+   - Keys cannot be extracted even from rooted devices
+   - OS-level protection against key theft
+
+2. **Why EncryptedSharedPreferences?**
+   - Built-in encryption with minimal code
+   - Automatic key rotation
+   - Jetpack Security library best practice
+
+3. **Why Custom Tabs instead of WebView?**
+   - Better security (separate process)
+   - User sees actual browser UI
+   - Password manager integration
+   - OAuth best practice per RFC 8252
+
+4. **Why inline JWKS instead of jwks_uri?**
+   - Simpler for mobile apps (no need to host endpoint)
+   - Reduced network calls during registration
+   - DHIS2 PR #22183 specifically supports this
+
+5. **Why private_key_jwt instead of client_secret?**
+   - No shared secret to compromise
+   - Asymmetric cryptography more secure for mobile
+   - Each device has unique credentials
+   - Client secret can't be kept secret on mobile
+
+===================================================================================
+FUTURE ENHANCEMENTS
+===================================================================================
+
+- [ ] Implement token refresh background worker
+- [ ] Add biometric authentication
+- [ ] Implement certificate pinning
+- [ ] Add key rotation mechanism
+- [ ] Add comprehensive error logging
+- [ ] Add analytics/crash reporting
+- [ ] Add offline mode support
+- [ ] Add multi-account support
+- [ ] Implement App Links instead of custom scheme
+- [ ] Add device attestation (SafetyNet/Play Integrity)
+- [ ] Add unit tests for managers
+- [ ] Add instrumented tests for full flow
+- [ ] Add UI tests with Espresso
+
+===================================================================================
+CONCLUSION
+===================================================================================
+
+This Android application successfully demonstrates the DHIS2 Android DCR OAuth2
+feature from PR #22183. It implements the complete flow from device enrollment
+through authenticated API access, using industry best practices for mobile OAuth2
+clients and secure key management.
+
+The implementation follows RFC 7591 (Dynamic Client Registration), RFC 7523 
+(JWT Profile for OAuth 2.0), and RFC 8252 (OAuth 2.0 for Native Apps).
+
+All cryptographic operations are performed using Android KeyStore and Nimbus
+JOSE+JWT library, ensuring security and standards compliance.
+
+The app is ready for testing against any DHIS2 server with the DCR feature enabled.
+
+===================================================================================
+END OF SUMMARY
+===================================================================================
+

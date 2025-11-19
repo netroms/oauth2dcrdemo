@@ -1,0 +1,84 @@
+Task: Add Git to Android OAuth2 Demo Project
+================================================
+
+Date: Wednesday, November 19, 2025
+Project: COPY_android_oauth2demo_COPY
+
+Overview
+--------
+Successfully initialized Git version control for the Android OAuth2 demo project with appropriate configuration for Android development.
+
+Changes Made
+------------
+
+1. Created .gitignore File
+   - Location: /.gitignore (project root)
+   - Purpose: Comprehensive Android project exclusion rules
+   - Key exclusions:
+     * Build artifacts (*.apk, *.aab, *.dex, build/, .gradle/)
+     * Local configuration (local.properties)
+     * IDE files (.idea/, *.iml)
+     * Generated files (bin/, gen/, out/)
+     * Android Studio specific (captures/, .navigation/)
+     * Native build files (.externalNativeBuild, .cxx/)
+     * Profiling files (*.hprof)
+     * macOS files (.DS_Store)
+     * Log files (*.log)
+     * Backup files (*~, *.swp, *.bak)
+   
+   - Important inclusions (NOT ignored):
+     * gradle-wrapper.jar (standard practice for reproducible builds)
+     * Source code files
+     * Resource files
+     * Build configuration files (build.gradle.kts, settings.gradle.kts)
+     * Gradle configuration (gradle.properties, libs.versions.toml)
+
+2. Initialized Git Repository
+   - Command: git init
+   - Result: Created .git directory and initialized empty repository
+   - Default branch: main
+
+3. Initial Commit
+   - Staged all files: git add .
+   - Commit message: "Initial commit: Android OAuth2 demo project"
+   - Commit hash: 2d00400
+   - Files committed: 37 files
+   - Lines added: 970 insertions
+   
+   Files included in initial commit:
+   - Project configuration: build.gradle.kts, settings.gradle.kts, gradle.properties
+   - Gradle wrapper: gradle/wrapper/* files, gradlew, gradlew.bat
+   - App module: app/build.gradle.kts, app/proguard-rules.pro
+   - Source code: MainActivity.kt
+   - Test files: ExampleInstrumentedTest.kt, ExampleUnitTest.kt
+   - Android manifest: AndroidManifest.xml
+   - Resources: All drawables, layouts, mipmaps, values, XML configurations
+   - Version catalog: gradle/libs.versions.toml
+   - Both .gitignore files (root and app/)
+
+Notes
+-----
+- One warning appeared during staging: "CRLF will be replaced by LF" for gradlew.bat
+  This is expected behavior for Windows batch files on macOS/Linux systems and is handled automatically by Git.
+
+- The file local.properties was NOT committed (as intended) since it contains local SDK paths specific to each developer's machine.
+
+- Final status: Working tree clean, all appropriate files committed to main branch.
+
+Best Practices Applied
+----------------------
+1. Comprehensive .gitignore for Android projects
+2. Included gradle-wrapper.jar for build reproducibility
+3. Excluded local.properties for environment-specific configuration
+4. Excluded all build artifacts and generated files
+5. Excluded IDE-specific configuration files that vary by developer
+6. Clean initial commit with descriptive message
+
+Next Steps (Optional)
+---------------------
+- Connect to a remote repository: git remote add origin <repository-url>
+- Push to remote: git push -u origin main
+- Configure git user if not already set globally:
+  git config user.name "Your Name"
+  git config user.email "your.email@example.com"
+

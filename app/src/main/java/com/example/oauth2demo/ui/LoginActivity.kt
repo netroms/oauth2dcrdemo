@@ -1,0 +1,190 @@
+package com.example.oauth2demo.ui
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.view.View
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.lifecycle.lifecycleScope
+import com.example.oauth2demo.MainActivity
+import com.example.oauth2demo.databinding.ActivityLoginBinding
+import com.example.oauth2demo.network.models.ApiResult
+import com.example.oauth2demo.oauth.JWTHelper
+import com.example.oauth2demo.oauth.OAuth2Manager
+import kotlinx.coroutines.launch
+
+/**
+ * Login activity - handles OAuth2 authorization code flow.
+ * 
+ * Flow:
+ * 1. User clicks "Login with DHIS2"
+ * 2. Open browser to /oauth/authorize
+ * 3. User authenticates
+ * 4. Browser redirects to dhis2oauth://oauth?code=...&state=...
+ * 5. This activity captures the redirect (via onNewIntent)
+ * 6. Exchange code for token using private_key_jwt
+ * 7. Navigate to MainActivity on success
+ */
+class LoginActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityLoginBinding
+    private lateinit var oauth2Manager: OAuth2Manager
+    private var currentState: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityLoginBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        oauth2Manager = OAuth2Manager(this)
+
+        setupUI()
+        
+        // Check if this is a redirect from OAuth flow
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun setupUI() {
+        // Display device info
+        val serverUrl = oauth2Manager.getServerUrl()
+        val clientId = oauth2Manager.getClientId()
+
+        binding.serverUrlTextView.text = "Server: $serverUrl"
+        binding.clientIdTextView.text = "Client ID: ${clientId?.take(16)}..."
+
+        binding.loginButton.setOnClickListener {
+            startOAuthFlow()
+        }
+    }
+
+    private fun handleIntent(intent: Intent) {
+        val uri = intent.data
+        if (uri != null && uri.scheme == "dhis2oauth") {
+            // This is an OAuth callback
+            processOAuthCallback(uri)
+        }
+    }
+
+    private fun startOAuthFlow() {
+        val serverUrl = oauth2Manager.getServerUrl()
+        val clientId = oauth2Manager.getClientId()
+
+        if (serverUrl.isNullOrBlank() || clientId.isNullOrBlank()) {
+            showError("Registration data not found. Please register device first.")
+            return
+        }
+
+        currentState = JWTHelper.generateState()
+        
+        // Save state for validation
+        getSharedPreferences("temp_prefs", MODE_PRIVATE)
+            .edit()
+            .putString("oauth_state", currentState)
+            .apply()
+
+        val authUrl = oauth2Manager.buildAuthorizationUrl(serverUrl, clientId, currentState!!)
+
+        // Open in Custom Tab
+        val customTabsIntent = CustomTabsIntent.Builder()
+            .setShowTitle(true)
+            .build()
+
+        customTabsIntent.launchUrl(this, Uri.parse(authUrl))
+
+        showStatus("Please login in the browser...")
+    }
+
+    private fun processOAuthCallback(uri: Uri) {
+        showLoading("Processing login...")
+
+        val code = uri.getQueryParameter("code")
+        val state = uri.getQueryParameter("state")
+
+        if (code.isNullOrBlank()) {
+            // Check for error
+            val error = uri.getQueryParameter("error")
+            val errorDescription = uri.getQueryParameter("error_description")
+            showError("Login failed: ${errorDescription ?: error ?: "Unknown error"}")
+            hideLoading()
+            return
+        }
+
+        // Validate state (CSRF protection)
+        val sharedPrefs = getSharedPreferences("temp_prefs", MODE_PRIVATE)
+        val expectedState = sharedPrefs.getString("oauth_state", null)
+
+        if (state != expectedState) {
+            showError("Invalid state parameter (CSRF check failed)")
+            hideLoading()
+            return
+        }
+
+        // Clear temporary data
+        sharedPrefs.edit().clear().apply()
+
+        // Exchange code for token
+        exchangeCodeForToken(code)
+    }
+
+    private fun exchangeCodeForToken(code: String) {
+        binding.statusTextView.text = "Exchanging code for token..."
+
+        lifecycleScope.launch {
+            when (val result = oauth2Manager.exchangeCodeForToken(code)) {
+                is ApiResult.Success -> {
+                    showSuccess("Login successful!")
+                    
+                    // Navigate to main activity
+                    val intent = Intent(this@LoginActivity, MainActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                    startActivity(intent)
+                    finish()
+                }
+                is ApiResult.Error -> {
+                    hideLoading()
+                    showError("Token exchange failed: ${result.message}")
+                }
+                is ApiResult.NetworkError -> {
+                    hideLoading()
+                    showError("Network error: ${result.exception.message}")
+                }
+            }
+        }
+    }
+
+    private fun showLoading(message: String) {
+        binding.progressBar.visibility = View.VISIBLE
+        binding.statusTextView.visibility = View.VISIBLE
+        binding.statusTextView.text = message
+        binding.loginButton.isEnabled = false
+    }
+
+    private fun hideLoading() {
+        binding.progressBar.visibility = View.GONE
+        binding.statusTextView.visibility = View.GONE
+        binding.loginButton.isEnabled = true
+    }
+
+    private fun showStatus(message: String) {
+        binding.statusTextView.visibility = View.VISIBLE
+        binding.statusTextView.text = message
+    }
+
+    private fun showSuccess(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        binding.statusTextView.visibility = View.VISIBLE
+        binding.statusTextView.text = message
+    }
+}
+
