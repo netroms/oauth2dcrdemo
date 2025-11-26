@@ -23,27 +23,43 @@ class OAuth2Manager(private val context: Context) {
     }
 
     /**
-     * Build the OAuth2 authorization URL for user login.
+     * Build the OAuth2 authorization URL for user login with PKCE support.
      * Opens in browser for user authentication.
+     * 
+     * @param serverUrl The DHIS2 server URL
+     * @param clientId The OAuth2 client ID
+     * @param state Random state for CSRF protection
+     * @param codeChallenge PKCE code challenge (Base64URL encoded SHA256 of code verifier)
      */
-    fun buildAuthorizationUrl(serverUrl: String, clientId: String, state: String): String {
+    fun buildAuthorizationUrl(
+        serverUrl: String,
+        clientId: String,
+        state: String,
+        codeChallenge: String
+    ): String {
         return Uri.parse("$serverUrl/oauth2/authorize").buildUpon()
             .appendQueryParameter("client_id", clientId)
             .appendQueryParameter("redirect_uri", REDIRECT_URI)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope", "openid profile")
             .appendQueryParameter("state", state)
+            .appendQueryParameter("code_challenge", codeChallenge)
+            .appendQueryParameter("code_challenge_method", "S256")
             .build()
             .toString()
     }
 
     /**
-     * Exchange authorization code for access token using private_key_jwt.
+     * Exchange authorization code for access token using private_key_jwt with PKCE.
      * 
      * @param authorizationCode Code received from OAuth redirect
+     * @param codeVerifier The PKCE code verifier used when initiating the auth flow
      * @return Result with success/error
      */
-    suspend fun exchangeCodeForToken(authorizationCode: String): ApiResult<Unit> {
+    suspend fun exchangeCodeForToken(
+        authorizationCode: String,
+        codeVerifier: String
+    ): ApiResult<Unit> {
         val serverUrl = storage.serverUrl
             ?: return ApiResult.Error("Server URL not found")
         val clientId = storage.clientId
@@ -52,25 +68,27 @@ class OAuth2Manager(private val context: Context) {
             ?: return ApiResult.Error("Key ID not found")
 
         try {
-            // Get RSA key for signing
-            val rsaKey = keyStoreManager.createRSAKey(keyId)
+            // Get private key from Android KeyStore for signing
+            val privateKey = keyStoreManager.getPrivateKey(keyId)
+                ?: return ApiResult.Error("Private key not found for keyId: $keyId")
 
             // Create client assertion (private_key_jwt)
             val tokenEndpoint = "$serverUrl/oauth2/token"
             val clientAssertion = JWTHelper.createClientAssertion(
                 clientId = clientId,
                 tokenEndpoint = tokenEndpoint,
-                rsaKey = rsaKey,
+                privateKey = privateKey,
                 keyId = keyId
             )
 
-            // Exchange code for tokens
+            // Exchange code for tokens with PKCE code_verifier
             return when (val result = apiClient.exchangeCodeForToken(
                 serverUrl = serverUrl,
                 clientId = clientId,
                 authorizationCode = authorizationCode,
                 redirectUri = REDIRECT_URI,
-                clientAssertion = clientAssertion
+                clientAssertion = clientAssertion,
+                codeVerifier = codeVerifier
             )) {
                 is ApiResult.Success -> {
                     // Store tokens
@@ -102,15 +120,16 @@ class OAuth2Manager(private val context: Context) {
             ?: return ApiResult.Error("Refresh token not found")
 
         try {
-            // Get RSA key for signing
-            val rsaKey = keyStoreManager.createRSAKey(keyId)
+            // Get private key from Android KeyStore for signing
+            val privateKey = keyStoreManager.getPrivateKey(keyId)
+                ?: return ApiResult.Error("Private key not found for keyId: $keyId")
 
             // Create client assertion
             val tokenEndpoint = "$serverUrl/oauth2/token"
             val clientAssertion = JWTHelper.createClientAssertion(
                 clientId = clientId,
                 tokenEndpoint = tokenEndpoint,
-                rsaKey = rsaKey,
+                privateKey = privateKey,
                 keyId = keyId
             )
 

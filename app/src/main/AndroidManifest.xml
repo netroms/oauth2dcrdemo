@@ -27,9 +27,10 @@
             </intent-filter>
         </activity>
         
-        <!-- Enrollment callback - Captures IAT from DHIS2 redirect -->
+        <!-- OAuth callback router - Handles all deep link callbacks from DHIS2 -->
+        <!-- Routes enrollment (iat) and login (code) callbacks to appropriate handlers -->
         <activity
-            android:name=".ui.EnrollmentActivity"
+            android:name=".ui.OAuthCallbackActivity"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>

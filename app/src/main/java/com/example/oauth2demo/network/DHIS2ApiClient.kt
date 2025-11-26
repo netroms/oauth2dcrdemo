@@ -70,15 +70,23 @@ class DHIS2ApiClient {
     }
 
     /**
-     * Exchange authorization code for access token using private_key_jwt.
-     * POST /oauth2/token with client_assertion.
+     * Exchange authorization code for access token using private_key_jwt with PKCE.
+     * POST /oauth2/token with client_assertion and code_verifier.
+     * 
+     * @param serverUrl The DHIS2 server URL
+     * @param clientId The OAuth2 client ID
+     * @param authorizationCode The authorization code from OAuth redirect
+     * @param redirectUri The redirect URI used in the authorization request
+     * @param clientAssertion The signed JWT for private_key_jwt authentication
+     * @param codeVerifier The PKCE code verifier (plain text, will be verified against code_challenge)
      */
     suspend fun exchangeCodeForToken(
         serverUrl: String,
         clientId: String,
         authorizationCode: String,
         redirectUri: String,
-        clientAssertion: String
+        clientAssertion: String,
+        codeVerifier: String
     ): ApiResult<TokenResponse> = withContext(Dispatchers.IO) {
         try {
             val url = "$serverUrl/oauth2/token"
@@ -88,6 +96,7 @@ class DHIS2ApiClient {
                 .add("code", authorizationCode)
                 .add("redirect_uri", redirectUri)
                 .add("client_id", clientId)
+                .add("code_verifier", codeVerifier)
                 .add("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
                 .add("client_assertion", clientAssertion)
                 .build()

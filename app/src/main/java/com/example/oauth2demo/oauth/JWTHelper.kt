@@ -1,16 +1,21 @@
 package com.example.oauth2demo.oauth
 
+import android.util.Base64
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.RSASSASigner
 import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.SignedJWT
+import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.SecureRandom
 import java.util.Date
 import java.util.UUID
 
 /**
  * Helper for creating JWT assertions for private_key_jwt authentication.
  * Follows RFC 7523: JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication.
+ * Also provides PKCE (RFC 7636) support for OAuth 2.0.
  */
 object JWTHelper {
 
@@ -19,7 +24,7 @@ object JWTHelper {
      * 
      * @param clientId The OAuth2 client ID (used as both issuer and subject)
      * @param tokenEndpoint The token endpoint URL (used as audience)
-     * @param rsaKey The RSA key pair with private key for signing
+     * @param privateKey The RSA private key for signing (from Android KeyStore)
      * @param keyId The key ID (kid) to include in JWT header
      * @param expiresInSeconds How long the JWT should be valid (default: 60 seconds)
      * @return Signed JWT string
@@ -27,7 +32,7 @@ object JWTHelper {
     fun createClientAssertion(
         clientId: String,
         tokenEndpoint: String,
-        rsaKey: com.nimbusds.jose.jwk.RSAKey,
+        privateKey: PrivateKey,
         keyId: String,
         expiresInSeconds: Long = 60
     ): String {
@@ -49,9 +54,10 @@ object JWTHelper {
             .keyID(keyId)
             .build()
 
-        // Sign the JWT with the private key
+        // Sign the JWT with the private key from Android KeyStore
+        // RSASSASigner accepts PrivateKey directly, which works with Android KeyStore keys
         val signedJWT = SignedJWT(header, claimsSet)
-        val signer = RSASSASigner(rsaKey)
+        val signer = RSASSASigner(privateKey)
         signedJWT.sign(signer)
 
         return signedJWT.serialize()
@@ -83,6 +89,41 @@ object JWTHelper {
         } catch (e: Exception) {
             null // Invalid JWT
         }
+    }
+
+    // ========== PKCE (RFC 7636) Support ==========
+
+    /**
+     * Generate a cryptographically random code verifier for PKCE.
+     * Per RFC 7636, the code verifier must be 43-128 characters from [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~".
+     * 
+     * @return A random code verifier string (64 characters)
+     */
+    fun generateCodeVerifier(): String {
+        val secureRandom = SecureRandom()
+        val codeVerifierBytes = ByteArray(48) // 48 bytes = 64 Base64URL characters
+        secureRandom.nextBytes(codeVerifierBytes)
+        return Base64.encodeToString(
+            codeVerifierBytes,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+        )
+    }
+
+    /**
+     * Generate a code challenge from a code verifier using S256 method.
+     * code_challenge = BASE64URL(SHA256(code_verifier))
+     * 
+     * @param codeVerifier The code verifier string
+     * @return The code challenge string (Base64URL encoded SHA256 hash)
+     */
+    fun generateCodeChallenge(codeVerifier: String): String {
+        val bytes = codeVerifier.toByteArray(Charsets.US_ASCII)
+        val messageDigest = MessageDigest.getInstance("SHA-256")
+        val digest = messageDigest.digest(bytes)
+        return Base64.encodeToString(
+            digest,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+        )
     }
 }
 

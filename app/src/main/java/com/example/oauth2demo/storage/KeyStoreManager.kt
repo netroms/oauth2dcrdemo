@@ -9,7 +9,6 @@ import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.PublicKey
-import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.util.UUID
 
@@ -87,19 +86,6 @@ class KeyStoreManager {
 
         val jwkSet = JWKSet(rsaKey)
         return jwkSet.toString()
-    }
-
-    /**
-     * Create RSAKey object (includes private key) for JWT signing.
-     */
-    fun createRSAKey(keyId: String): RSAKey {
-        val keyPair = getKeyPair(keyId)
-            ?: throw IllegalStateException("Key pair not found for keyId: $keyId")
-
-        return RSAKey.Builder(keyPair.public as RSAPublicKey)
-            .privateKey(keyPair.private as RSAPrivateKey)
-            .keyID(keyId)
-            .build()
     }
 
     /**
