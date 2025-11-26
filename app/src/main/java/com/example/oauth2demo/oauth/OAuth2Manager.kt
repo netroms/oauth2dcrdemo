@@ -41,7 +41,7 @@ class OAuth2Manager(private val context: Context) {
             .appendQueryParameter("client_id", clientId)
             .appendQueryParameter("redirect_uri", REDIRECT_URI)
             .appendQueryParameter("response_type", "code")
-            .appendQueryParameter("scope", "openid profile")
+            .appendQueryParameter("scope", "openid profile username")
             .appendQueryParameter("state", state)
             .appendQueryParameter("code_challenge", codeChallenge)
             .appendQueryParameter("code_challenge_method", "S256")

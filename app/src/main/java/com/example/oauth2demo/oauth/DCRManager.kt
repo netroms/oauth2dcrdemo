@@ -78,7 +78,7 @@ class DCRManager(private val context: Context) {
                 responseTypes = listOf("code"),
                 tokenEndpointAuthMethod = "private_key_jwt",
                 tokenEndpointAuthSigningAlg = "RS256",
-                scope = "openid profile",
+                scope = "openid profile username",
                 jwksUri = "https://dhis2.org/jwks.json", // Required but ignored per spec
                 jwks = jwks
             )

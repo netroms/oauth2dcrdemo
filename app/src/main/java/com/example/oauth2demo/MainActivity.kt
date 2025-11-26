@@ -37,6 +37,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
+        binding.retryButton.setOnClickListener {
+            loadUserInfo()
+        }
+
         binding.logoutButton.setOnClickListener {
             logout()
         }
