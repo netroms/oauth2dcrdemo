@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.lifecycle.lifecycleScope
@@ -67,6 +68,10 @@ class WelcomeActivity : AppCompatActivity() {
 
         binding.loginButton.setOnClickListener {
             navigateToLogin()
+        }
+
+        binding.resetButton.setOnClickListener {
+            showResetConfirmation()
         }
     }
 
@@ -172,6 +177,31 @@ class WelcomeActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         binding.statusTextView.visibility = View.VISIBLE
         binding.statusTextView.text = message
+    }
+
+    private fun showResetConfirmation() {
+        AlertDialog.Builder(this)
+            .setTitle("Reset Registration")
+            .setMessage("This will delete all registration data and keys. You will need to register again. Continue?")
+            .setPositiveButton("Reset") { _, _ ->
+                resetRegistration()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun resetRegistration() {
+        dcrManager.resetRegistration()
+        oauth2Manager.logout()
+        
+        Toast.makeText(this, "Registration reset complete", Toast.LENGTH_SHORT).show()
+        
+        // Reset UI to initial state
+        binding.serverUrlEditText.isEnabled = true
+        binding.serverUrlEditText.setText("https://play.dhis2.org/dev")
+        binding.registerButton.visibility = View.VISIBLE
+        binding.loginButton.visibility = View.GONE
+        binding.statusTextView.visibility = View.GONE
     }
 
     override fun onResume() {
