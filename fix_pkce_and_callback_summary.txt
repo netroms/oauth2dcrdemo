@@ -1,0 +1,275 @@
+===================================================================================
+FIX PKCE AND OAUTH CALLBACK ROUTING - IMPLEMENTATION SUMMARY
+===================================================================================
+
+ISSUE: Two problems with OAuth2 authorization flow
+DATE: November 26, 2025
+
+===================================================================================
+PROBLEM 1: Missing PKCE Support
+===================================================================================
+
+The `/oauth2/authorize` call was missing required PKCE (Proof Key for Code Exchange)
+parameters. With mandatory PKCE enabled on the DHIS2 server, the authorization
+request was failing.
+
+PKCE is required per RFC 7636 for public clients (like mobile apps) to prevent
+authorization code interception attacks.
+
+===================================================================================
+PROBLEM 2: Wrong Callback Routing
+===================================================================================
+
+Both enrollment (`?iat=...`) and OAuth login (`?code=...`) callbacks used the same
+deep link URI scheme `dhis2oauth://oauth`. Only `EnrollmentActivity` was registered
+in the manifest to handle this URI, so ALL callbacks were routed there.
+
+When an OAuth login callback arrived (with `code` parameter), it was incorrectly
+processed by `processEnrollmentCallback()` which expected an `iat` parameter,
+causing the flow to fail.
+
+===================================================================================
+SOLUTION IMPLEMENTED
+===================================================================================
+
+### Part 1: PKCE Support Added
+
+**Files Modified:**
+
+1. `app/src/main/java/com/example/oauth2demo/oauth/JWTHelper.kt`
+   - Added `generateCodeVerifier()`: Generates a cryptographically random 64-char
+     Base64URL string using SecureRandom (48 bytes = 64 Base64 chars)
+   - Added `generateCodeChallenge(verifier)`: Computes SHA256 hash of verifier
+     and returns Base64URL encoded result
+
+2. `app/src/main/java/com/example/oauth2demo/oauth/OAuth2Manager.kt`
+   - Updated `buildAuthorizationUrl()` to accept `codeChallenge` parameter
+   - Added `code_challenge` and `code_challenge_method=S256` query parameters
+   - Updated `exchangeCodeForToken()` to accept `codeVerifier` parameter
+
+3. `app/src/main/java/com/example/oauth2demo/network/DHIS2ApiClient.kt`
+   - Added `codeVerifier` parameter to `exchangeCodeForToken()`
+   - Added `code_verifier` to the token exchange form body
+
+4. `app/src/main/java/com/example/oauth2demo/ui/LoginActivity.kt`
+   - Generate `code_verifier` and `code_challenge` when starting OAuth flow
+   - Store `code_verifier` in temp SharedPreferences alongside state
+   - Retrieve `code_verifier` when exchanging code for token
+   - Pass `code_verifier` to `exchangeCodeForToken()`
+
+### Part 2: Callback Routing Fixed
+
+**Files Modified:**
+
+1. Renamed `EnrollmentActivity.kt` to `OAuthCallbackActivity.kt`
+   - Now acts as a central router for all OAuth/DCR deep link callbacks
+   - Inspects callback parameters to determine callback type:
+     * `iat` parameter → enrollment flow (device registration)
+     * `code` parameter → login flow (forward to LoginActivity)
+     * `error` parameter → display error and navigate back
+   - Forwards OAuth code to LoginActivity via Intent extras
+
+2. `app/src/main/java/com/example/oauth2demo/ui/LoginActivity.kt`
+   - Removed direct deep link handling (no longer receives deep links)
+   - Added handling for Intent extras from OAuthCallbackActivity
+   - Receives `EXTRA_AUTH_CODE` and processes token exchange
+
+3. `app/src/main/AndroidManifest.xml`
+   - Updated activity declaration from `EnrollmentActivity` to `OAuthCallbackActivity`
+   - Intent filter remains the same (handles `dhis2oauth://oauth`)
+
+===================================================================================
+DETAILED CODE CHANGES
+===================================================================================
+
+### JWTHelper.kt - PKCE Functions Added
+
+```kotlin
+fun generateCodeVerifier(): String {
+    val secureRandom = SecureRandom()
+    val codeVerifierBytes = ByteArray(48) // 48 bytes = 64 Base64URL characters
+    secureRandom.nextBytes(codeVerifierBytes)
+    return Base64.encodeToString(
+        codeVerifierBytes,
+        Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+    )
+}
+
+fun generateCodeChallenge(codeVerifier: String): String {
+    val bytes = codeVerifier.toByteArray(Charsets.US_ASCII)
+    val messageDigest = MessageDigest.getInstance("SHA-256")
+    val digest = messageDigest.digest(bytes)
+    return Base64.encodeToString(
+        digest,
+        Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+    )
+}
+```
+
+### OAuth2Manager.kt - Authorization URL with PKCE
+
+```kotlin
+fun buildAuthorizationUrl(
+    serverUrl: String,
+    clientId: String,
+    state: String,
+    codeChallenge: String
+): String {
+    return Uri.parse("$serverUrl/oauth2/authorize").buildUpon()
+        .appendQueryParameter("client_id", clientId)
+        .appendQueryParameter("redirect_uri", REDIRECT_URI)
+        .appendQueryParameter("response_type", "code")
+        .appendQueryParameter("scope", "openid profile")
+        .appendQueryParameter("state", state)
+        .appendQueryParameter("code_challenge", codeChallenge)
+        .appendQueryParameter("code_challenge_method", "S256")
+        .build()
+        .toString()
+}
+```
+
+### DHIS2ApiClient.kt - Token Exchange with code_verifier
+
+The token exchange now includes `code_verifier` in the form body:
+
+```kotlin
+val formBody = FormBody.Builder()
+    .add("grant_type", "authorization_code")
+    .add("code", authorizationCode)
+    .add("redirect_uri", redirectUri)
+    .add("client_id", clientId)
+    .add("code_verifier", codeVerifier)  // NEW: PKCE code verifier
+    .add("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+    .add("client_assertion", clientAssertion)
+    .build()
+```
+
+### OAuthCallbackActivity.kt - Callback Router
+
+New activity that routes callbacks based on parameters:
+
+```kotlin
+private fun routeCallback() {
+    val uri = intent.data
+    
+    // Check for error first
+    val error = uri.getQueryParameter("error")
+    if (!error.isNullOrBlank()) {
+        showError("OAuth error: ${errorDescription ?: error}")
+        navigateToWelcome()
+        return
+    }
+
+    // Check if this is an enrollment callback (has IAT)
+    val iat = uri.getQueryParameter("iat")
+    if (!iat.isNullOrBlank()) {
+        processEnrollmentCallback(iat, uri.getQueryParameter("state"))
+        return
+    }
+
+    // Check if this is a login callback (has authorization code)
+    val code = uri.getQueryParameter("code")
+    if (!code.isNullOrBlank()) {
+        processLoginCallback(code, uri.getQueryParameter("state"))
+        return
+    }
+}
+```
+
+===================================================================================
+OAUTH FLOW AFTER FIX
+===================================================================================
+
+### Login Flow (Updated with PKCE):
+
+1. User clicks "Login with DHIS2" in LoginActivity
+2. App generates:
+   - `code_verifier`: Random 64-char Base64URL string
+   - `code_challenge`: Base64URL(SHA256(code_verifier))
+   - `state`: Random UUID for CSRF protection
+3. App stores `code_verifier` and `state` in temp SharedPreferences
+4. App opens: {server}/oauth2/authorize?
+     client_id=...
+     redirect_uri=dhis2oauth://oauth
+     response_type=code
+     scope=openid profile
+     state={state}
+     code_challenge={codeChallenge}
+     code_challenge_method=S256
+5. User authenticates in browser
+6. DHIS2 redirects: dhis2oauth://oauth?code={authCode}&state={state}
+7. OAuthCallbackActivity receives callback
+8. OAuthCallbackActivity detects `code` parameter → login callback
+9. OAuthCallbackActivity validates state
+10. OAuthCallbackActivity forwards code to LoginActivity via Intent extras
+11. LoginActivity retrieves `code_verifier` from temp storage
+12. LoginActivity calls exchangeCodeForToken(code, codeVerifier)
+13. POST /oauth2/token with:
+    - grant_type=authorization_code
+    - code={authCode}
+    - redirect_uri=dhis2oauth://oauth
+    - client_id={clientId}
+    - code_verifier={codeVerifier}  ← Server verifies SHA256(code_verifier) == code_challenge
+    - client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+    - client_assertion={signedJWT}
+14. DHIS2 returns access_token, refresh_token, expires_in
+15. App navigates to MainActivity
+
+===================================================================================
+FILES CHANGED
+===================================================================================
+
+Modified:
+- app/src/main/java/com/example/oauth2demo/oauth/JWTHelper.kt
+- app/src/main/java/com/example/oauth2demo/oauth/OAuth2Manager.kt
+- app/src/main/java/com/example/oauth2demo/network/DHIS2ApiClient.kt
+- app/src/main/java/com/example/oauth2demo/ui/LoginActivity.kt
+- app/src/main/AndroidManifest.xml
+
+Added:
+- app/src/main/java/com/example/oauth2demo/ui/OAuthCallbackActivity.kt
+
+Deleted:
+- app/src/main/java/com/example/oauth2demo/ui/EnrollmentActivity.kt
+
+===================================================================================
+TESTING NOTES
+===================================================================================
+
+To verify the fix:
+
+1. Build and install the app
+2. Register device (enrollment flow should still work)
+3. Click "Login with DHIS2"
+4. Verify browser opens with PKCE parameters in URL:
+   - code_challenge should be present
+   - code_challenge_method=S256 should be present
+5. Complete authentication in browser
+6. Verify app receives callback and processes it in OAuthCallbackActivity
+7. Verify token exchange succeeds (requires code_verifier)
+8. Verify app navigates to MainActivity with user info displayed
+
+===================================================================================
+RATIONALE
+===================================================================================
+
+1. **PKCE Implementation**
+   - Uses S256 (SHA-256) challenge method as recommended by RFC 7636
+   - Code verifier is 64 characters (48 bytes base64-encoded), well within spec (43-128)
+   - Uses SecureRandom for cryptographic randomness
+
+2. **Callback Router Pattern**
+   - Single point of entry for all OAuth callbacks simplifies manifest configuration
+   - Clear separation of concerns - router only routes, doesn't handle business logic
+   - Easier to add new callback types in the future
+   - State validation happens at router level for consistent security
+
+3. **Intent Extras vs SharedPreferences**
+   - Auth code passed via Intent extras for immediate processing
+   - Code verifier stored in SharedPreferences because it's needed before and after
+     browser redirect (can't pass through browser)
+
+===================================================================================
+END OF SUMMARY
+===================================================================================
+
