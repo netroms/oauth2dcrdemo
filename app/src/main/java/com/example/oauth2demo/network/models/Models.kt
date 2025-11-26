@@ -1,5 +1,6 @@
 package com.example.oauth2demo.network.models
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -23,9 +24,9 @@ data class ClientRegistrationRequest(
     fun toJson(): String {
         val json = JSONObject().apply {
             put("client_name", clientName)
-            put("redirect_uris", redirectUris)
-            put("grant_types", grantTypes)
-            put("response_types", responseTypes)
+            put("redirect_uris", JSONArray(redirectUris))
+            put("grant_types", JSONArray(grantTypes))
+            put("response_types", JSONArray(responseTypes))
             put("token_endpoint_auth_method", tokenEndpointAuthMethod)
             put("token_endpoint_auth_signing_alg", tokenEndpointAuthSigningAlg)
             put("scope", scope)

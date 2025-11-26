@@ -27,7 +27,7 @@ class OAuth2Manager(private val context: Context) {
      * Opens in browser for user authentication.
      */
     fun buildAuthorizationUrl(serverUrl: String, clientId: String, state: String): String {
-        return Uri.parse("$serverUrl/oauth/authorize").buildUpon()
+        return Uri.parse("$serverUrl/oauth2/authorize").buildUpon()
             .appendQueryParameter("client_id", clientId)
             .appendQueryParameter("redirect_uri", REDIRECT_URI)
             .appendQueryParameter("response_type", "code")
