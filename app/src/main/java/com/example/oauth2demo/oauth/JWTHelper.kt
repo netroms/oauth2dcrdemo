@@ -38,14 +38,24 @@ object JWTHelper {
     ): String {
         val now = Date()
         val expirationTime = Date(now.time + expiresInSeconds * 1000)
-
-        val aud = "https://dev.im.dhis2.org/"
+        // Create client assertion
+        // Parse base URL from tokenEndpoint, including context path (first-level)
+        val base = try {
+            val url = java.net.URL(tokenEndpoint)
+            val pathParts = url.path.split("/").filter { it.isNotBlank() }
+            val contextPath = if (pathParts.isNotEmpty()) "/${pathParts[0]}" else ""
+            url.protocol + "://" + url.host + (if (url.port != -1) ":${url.port}" else "") + contextPath + "/"
+        } catch (e: Exception) {
+            // Fallback: just use the tokenEndpoint's host as audience
+            tokenEndpoint
+        }
+//        val aud = "https://dev.im.dhis2.org/"
         // Create JWT claims per RFC 7523
         val claimsSet = JWTClaimsSet.Builder()
             .issuer(clientId)           // iss: The client_id
             .subject(clientId)          // sub: The client_id
 //            .audience(tokenEndpoint.replace("10.0.2.2", "localhost"))
-            .audience(aud)
+            .audience(base)
             .issueTime(now)             // iat: Current time
             .expirationTime(expirationTime) // exp: Expiration time
             .jwtID(UUID.randomUUID().toString()) // jti: Unique token ID
