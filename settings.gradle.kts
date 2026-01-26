@@ -14,6 +14,10 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        mavenLocal()
+        maven("https://oss.sonatype.org/content/repositories/snapshots")
+        maven("https://central.sonatype.com/repository/maven-snapshots")
+        maven("https://jitpack.io")
         google()
         mavenCentral()
     }

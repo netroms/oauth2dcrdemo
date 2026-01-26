@@ -1,6 +1,6 @@
 [versions]
 agp = "8.13.1"
-kotlin = "2.0.21"
+kotlin = "2.1.0"
 coreKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.1.5"
@@ -10,11 +10,12 @@ material = "1.10.0"
 activity = "1.8.0"
 constraintlayout = "2.1.4"
 okhttp = "4.12.0"
-nimbusJose = "9.37.3"
-securityCrypto = "1.1.0-alpha06"
 coroutines = "1.7.3"
 browser = "1.8.0"
 lifecycle = "2.7.0"
+dhis2AndroidSdk = "1.14.0-OAUTH2-POC-SNAPSHOT"
+appauth = "0.11.1"
+desugarJdkLibs = "2.1.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -27,12 +28,13 @@ androidx-activity = { group = "androidx.activity", name = "activity", version.re
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
-nimbus-jose-jwt = { group = "com.nimbusds", name = "nimbus-jose-jwt", version.ref = "nimbusJose" }
-androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 androidx-lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+dhis2sdk = { group = "org.hisp.dhis", name = "android-core", version.ref = "dhis2AndroidSdk" }
+appauth = { group = "net.openid", name = "appauth", version.ref = "appauth" }
+desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

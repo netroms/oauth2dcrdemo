@@ -14,7 +14,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Oauth2demo"
         android:usesCleartextTraffic="true"
-        tools:targetApi="m">
+        tools:targetApi="m"
+        tools:replace="android:allowBackup,android:fullBackupContent">
         
         <!-- Welcome screen - First launch -->
         <activity

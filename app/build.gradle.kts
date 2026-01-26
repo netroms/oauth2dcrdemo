@@ -31,6 +31,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "11"
@@ -47,15 +48,18 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
     
+    // Core library desugaring (required by DHIS2 SDK)
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
+    
+    // DHIS2 Android SDK
+    implementation(libs.dhis2sdk)
+    
+    // AppAuth for IntentWithRequestCode
+    implementation(libs.appauth)
+    
     // HTTP client
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
-    
-    // JWT/JWKS handling
-    implementation(libs.nimbus.jose.jwt)
-    
-    // Secure storage
-    implementation(libs.androidx.security.crypto)
     
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
