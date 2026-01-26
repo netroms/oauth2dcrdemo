@@ -8,11 +8,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.oauth2demo.databinding.ActivityMainBinding
-import com.example.oauth2demo.network.models.ApiResult
-import com.example.oauth2demo.oauth.DCRManager
-import com.example.oauth2demo.oauth.OAuth2Manager
 import com.example.oauth2demo.ui.WelcomeActivity
 import kotlinx.coroutines.launch
+import org.hisp.dhis.android.core.D2
+import org.hisp.dhis.android.core.D2Configuration
+import org.hisp.dhis.android.core.D2Manager
 
 /**
  * Main activity - shown after successful login.
@@ -21,16 +21,20 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var oauth2Manager: OAuth2Manager
-    private lateinit var dcrManager: DCRManager
+    private lateinit var d2: D2
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        oauth2Manager = OAuth2Manager(this)
-        dcrManager = DCRManager(this)
+        // Initialize DHIS2 SDK
+        val d2Configuration = D2Configuration.builder()
+            .context(applicationContext)
+            .build()
+        
+        d2 = D2Manager.blockingInstantiateD2(d2Configuration)
+            ?: throw IllegalStateException("Failed to initialize D2")
 
         setupUI()
         loadUserInfo()
@@ -56,59 +60,49 @@ class MainActivity : AppCompatActivity() {
         // Display device info immediately
         displayDeviceInfo()
 
-        // Fetch user info from API
+        // Fetch user info from SDK
         lifecycleScope.launch {
-            when (val result = oauth2Manager.getUserInfo()) {
-                is ApiResult.Success -> {
-                    hideLoading()
-                    displayUserInfo(result.data)
+            try {
+                // The SDK handles token refresh automatically
+                val user = d2.userModule().user().blockingGet()
+                
+                hideLoading()
+                
+                if (user != null) {
+                    binding.usernameTextView.text = "Username: ${user.username()}"
+                    binding.displayNameTextView.text = "Display Name: ${user.displayName() ?: "N/A"}"
+                    binding.emailTextView.text = "Email: ${user.email() ?: "N/A"}"
+                } else {
+                    showError("User info not available")
                 }
-                is ApiResult.Error -> {
-                    hideLoading()
-                    showError("Failed to load user info: ${result.message}")
-                }
-                is ApiResult.NetworkError -> {
-                    hideLoading()
-                    showError("Network error: ${result.exception.message}")
-                }
+            } catch (e: Exception) {
+                hideLoading()
+                showError("Failed to load user info: ${e.message}")
             }
         }
-    }
-
-    private fun displayUserInfo(userInfo: com.example.oauth2demo.network.models.UserInfo) {
-        binding.usernameTextView.text = "Username: ${userInfo.username}"
-        binding.displayNameTextView.text = "Display Name: ${userInfo.displayName ?: "N/A"}"
-        binding.emailTextView.text = "Email: ${userInfo.email ?: "N/A"}"
     }
 
     private fun displayDeviceInfo() {
-        val serverUrl = oauth2Manager.getServerUrl()
-        val clientId = oauth2Manager.getClientId()
-        val accessToken = oauth2Manager.getAccessToken()
+        val clientId = d2.userModule().oauth2Handler().getClientId()
 
-        binding.serverUrlTextView.text = "Server: $serverUrl"
         binding.clientIdTextView.text = "Client ID: $clientId"
-
-        // Truncate access token for display
-        if (!accessToken.isNullOrBlank()) {
-            val truncatedToken = if (accessToken.length > 80) {
-                accessToken.take(77) + "..."
-            } else {
-                accessToken
-            }
-            binding.accessTokenTextView.text = truncatedToken
-        }
     }
 
     private fun logout() {
-        oauth2Manager.logout()
-        Toast.makeText(this, "Logged out successfully", Toast.LENGTH_SHORT).show()
-        
-        // Navigate back to Welcome/Login screen
-        val intent = Intent(this, WelcomeActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-        startActivity(intent)
-        finish()
+        lifecycleScope.launch {
+            try {
+                d2.userModule().oauth2Handler().blockingLogOut()
+                Toast.makeText(this@MainActivity, "Logged out successfully", Toast.LENGTH_SHORT).show()
+                
+                // Navigate back to Welcome/Login screen
+                val intent = Intent(this@MainActivity, WelcomeActivity::class.java)
+                intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(intent)
+                finish()
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun showResetConfirmation() {
@@ -123,8 +117,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resetRegistration() {
-        dcrManager.resetRegistration()
-        oauth2Manager.logout()
+        d2.userModule().oauth2Handler().resetRegistration()
         
         Toast.makeText(this, "Registration reset complete", Toast.LENGTH_SHORT).show()
         

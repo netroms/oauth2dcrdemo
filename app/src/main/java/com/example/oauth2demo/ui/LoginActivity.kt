@@ -10,10 +10,11 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.lifecycle.lifecycleScope
 import com.example.oauth2demo.MainActivity
 import com.example.oauth2demo.databinding.ActivityLoginBinding
-import com.example.oauth2demo.network.models.ApiResult
-import com.example.oauth2demo.oauth.JWTHelper
-import com.example.oauth2demo.oauth.OAuth2Manager
 import kotlinx.coroutines.launch
+import org.hisp.dhis.android.core.D2
+import org.hisp.dhis.android.core.D2Configuration
+import org.hisp.dhis.android.core.D2Manager
+import org.hisp.dhis.android.core.user.oauth2.OAuth2Config
 
 /**
  * Login activity - handles OAuth2 authorization code flow with PKCE.
@@ -31,14 +32,24 @@ import kotlinx.coroutines.launch
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLoginBinding
-    private lateinit var oauth2Manager: OAuth2Manager
+    private lateinit var d2: D2
+    
+    companion object {
+        private const val LOGIN_REQUEST_CODE = 1001
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        oauth2Manager = OAuth2Manager(this)
+        // Initialize DHIS2 SDK
+        val d2Configuration = D2Configuration.builder()
+            .context(applicationContext)
+            .build()
+        
+        d2 = D2Manager.blockingInstantiateD2(d2Configuration)
+            ?: throw IllegalStateException("Failed to initialize D2")
 
         setupUI()
         
@@ -54,10 +65,8 @@ class LoginActivity : AppCompatActivity() {
 
     private fun setupUI() {
         // Display device info
-        val serverUrl = oauth2Manager.getServerUrl()
-        val clientId = oauth2Manager.getClientId()
+        val clientId = d2.userModule().oauth2Handler().getClientId()
 
-        binding.serverUrlTextView.text = "Server: $serverUrl"
         binding.clientIdTextView.text = "Client ID: ${clientId?.take(16)}..."
 
         binding.loginButton.setOnClickListener {
@@ -77,47 +86,44 @@ class LoginActivity : AppCompatActivity() {
     }
 
     /**
-     * Start OAuth2 authorization flow with PKCE.
+     * Start OAuth2 authorization flow using SDK.
+     * The SDK handles PKCE and state generation internally.
      */
     private fun startOAuthFlow() {
-        val serverUrl = oauth2Manager.getServerUrl()
-        val clientId = oauth2Manager.getClientId()
-
-        if (serverUrl.isNullOrBlank() || clientId.isNullOrBlank()) {
+        if (!d2.userModule().oauth2Handler().isDeviceRegistered()) {
             showError("Registration data not found. Please register device first.")
             return
         }
 
-        // Generate PKCE parameters
-        val codeVerifier = JWTHelper.generateCodeVerifier()
-        val codeChallenge = JWTHelper.generateCodeChallenge(codeVerifier)
+        // Get server URL from temp storage (set during enrollment)
+        val serverUrl = getSharedPreferences("temp_prefs", MODE_PRIVATE)
+            .getString("pending_server_url", null)
         
-        // Generate state for CSRF protection
-        val state = JWTHelper.generateState()
+        if (serverUrl.isNullOrBlank()) {
+            showError("Server URL not found. Please restart enrollment.")
+            return
+        }
         
-        // Save state and code_verifier for validation and token exchange
-        getSharedPreferences("temp_prefs", MODE_PRIVATE)
-            .edit()
-            .putString("oauth_state", state)
-            .putString("oauth_code_verifier", codeVerifier)
-            .apply()
-
-        // Build authorization URL with PKCE
-        val authUrl = oauth2Manager.buildAuthorizationUrl(
-            serverUrl = serverUrl,
-            clientId = clientId,
-            state = state,
-            codeChallenge = codeChallenge
-        )
-
-        // Open in Custom Tab
-        val customTabsIntent = CustomTabsIntent.Builder()
-            .setShowTitle(true)
-            .build()
-
-        customTabsIntent.launchUrl(this, Uri.parse(authUrl))
-
-        showStatus("Please login in the browser...")
+        lifecycleScope.launch {
+            try {
+                val config = OAuth2Config(serverUrl = serverUrl)
+                
+                // SDK generates PKCE parameters and builds authorization URL internally
+                val intentWithRequestCode = d2.userModule().oauth2Handler()
+                    .blockingLogIn(config)
+                
+                // Launch browser with the OAuth flow
+                @Suppress("DEPRECATION")
+                startActivityForResult(
+                    intentWithRequestCode.intent,
+                    intentWithRequestCode.requestCode
+                )
+                
+                showStatus("Please login in the browser...")
+            } catch (e: Exception) {
+                showError("Failed to start login: ${e.message}")
+            }
+        }
     }
 
     /**
@@ -126,51 +132,43 @@ class LoginActivity : AppCompatActivity() {
     private fun processAuthCode(code: String) {
         showLoading("Processing login...")
 
-        // Get code_verifier from temp storage
-        val sharedPrefs = getSharedPreferences("temp_prefs", MODE_PRIVATE)
-        val codeVerifier = sharedPrefs.getString("oauth_code_verifier", null)
-
-        if (codeVerifier.isNullOrBlank()) {
-            showError("Code verifier not found. Please try logging in again.")
-            hideLoading()
-            return
+        lifecycleScope.launch {
+            try {
+                val serverUrl = getSharedPreferences("temp_prefs", MODE_PRIVATE)
+                    .getString("pending_server_url", null)
+                
+                if (serverUrl.isNullOrBlank()) {
+                    showError("Server URL not found.")
+                    hideLoading()
+                    return@launch
+                }
+                
+                // Handle login response using SDK
+                val user = d2.userModule().oauth2Handler()
+                    .blockingHandleLogInResponse(serverUrl, code)
+                
+                showSuccess("Login successful! Welcome ${user.username()}")
+                
+                // Navigate to main activity
+                val intent = Intent(this@LoginActivity, MainActivity::class.java)
+                intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(intent)
+                finish()
+            } catch (e: Exception) {
+                hideLoading()
+                showError("Login failed: ${e.message}")
+            }
         }
-
-        // Clear temporary OAuth data
-        sharedPrefs.edit()
-            .remove("oauth_state")
-            .remove("oauth_code_verifier")
-            .apply()
-
-        // Exchange code for token with PKCE
-        exchangeCodeForToken(code, codeVerifier)
     }
 
-    /**
-     * Exchange authorization code for access token using private_key_jwt and PKCE.
-     */
-    private fun exchangeCodeForToken(code: String, codeVerifier: String) {
-        binding.statusTextView.text = "Exchanging code for token..."
-
-        lifecycleScope.launch {
-            when (val result = oauth2Manager.exchangeCodeForToken(code, codeVerifier)) {
-                is ApiResult.Success -> {
-                    showSuccess("Login successful!")
-                    
-                    // Navigate to main activity
-                    val intent = Intent(this@LoginActivity, MainActivity::class.java)
-                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-                    startActivity(intent)
-                    finish()
-                }
-                is ApiResult.Error -> {
-                    hideLoading()
-                    showError("Token exchange failed: ${result.message}")
-                }
-                is ApiResult.NetworkError -> {
-                    hideLoading()
-                    showError("Network error: ${result.exception.message}")
-                }
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        
+        // Handle result from OAuth browser flow
+        if (data != null) {
+            val code = data.data?.getQueryParameter("code")
+            if (code != null) {
+                processAuthCode(code)
             }
         }
     }

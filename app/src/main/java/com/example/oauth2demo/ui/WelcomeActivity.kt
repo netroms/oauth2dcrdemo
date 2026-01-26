@@ -10,14 +10,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.lifecycle.lifecycleScope
 import com.example.oauth2demo.MainActivity
-import com.example.oauth2demo.R
 import com.example.oauth2demo.databinding.ActivityWelcomeBinding
 import com.example.oauth2demo.network.DHIS2ApiClient
 import com.example.oauth2demo.network.models.ApiResult
-import com.example.oauth2demo.oauth.DCRManager
-import com.example.oauth2demo.oauth.JWTHelper
-import com.example.oauth2demo.oauth.OAuth2Manager
 import kotlinx.coroutines.launch
+import org.hisp.dhis.android.core.D2
+import org.hisp.dhis.android.core.D2Configuration
+import org.hisp.dhis.android.core.D2Manager
 
 /**
  * Welcome screen - first screen shown to user.
@@ -26,18 +25,21 @@ import kotlinx.coroutines.launch
 class WelcomeActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityWelcomeBinding
-    private lateinit var dcrManager: DCRManager
-    private lateinit var oauth2Manager: OAuth2Manager
+    private lateinit var d2: D2
     private lateinit var apiClient: DHIS2ApiClient
-    private var currentState: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityWelcomeBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        dcrManager = DCRManager(this)
-        oauth2Manager = OAuth2Manager(this)
+        // Initialize DHIS2 SDK
+        val d2Configuration = D2Configuration.builder()
+            .context(applicationContext)
+            .build()
+        
+        d2 = D2Manager.blockingInstantiateD2(d2Configuration) 
+            ?: throw IllegalStateException("Failed to initialize D2")
         apiClient = DHIS2ApiClient()
 
         setupUI()
@@ -77,13 +79,13 @@ class WelcomeActivity : AppCompatActivity() {
 
     private fun checkExistingState() {
         // Check if already registered
-        if (dcrManager.isDeviceRegistered()) {
+        if (d2.userModule().oauth2Handler().isDeviceRegistered()) {
             showRegisteredState()
             return
         }
 
         // Check if already logged in
-        if (oauth2Manager.isLoggedIn()) {
+        if (d2.userModule().oauth2Handler().isLoggedIn()) {
             navigateToMain()
             return
         }
@@ -112,16 +114,15 @@ class WelcomeActivity : AppCompatActivity() {
     }
 
     private fun openEnrollmentInBrowser(serverUrl: String) {
-        currentState = JWTHelper.generateState()
-        
-        // Store server URL temporarily for EnrollmentActivity
+        // Store server URL temporarily for callback
         getSharedPreferences("temp_prefs", MODE_PRIVATE)
             .edit()
             .putString("pending_server_url", serverUrl)
-            .putString("pending_state", currentState)
             .apply()
 
-        val enrollmentUrl = dcrManager.buildEnrollmentUrl(serverUrl, currentState!!)
+        // Build enrollment URL using SDK
+        val enrollmentUrl = d2.userModule().oauth2Handler()
+            .blockingBuildEnrollmentUrl(serverUrl)
         
         hideLoading()
         
@@ -136,11 +137,11 @@ class WelcomeActivity : AppCompatActivity() {
     }
 
     private fun showRegisteredState() {
-        binding.serverUrlEditText.setText(dcrManager.getServerUrl())
+        val clientId = d2.userModule().oauth2Handler().getClientId()
         binding.serverUrlEditText.isEnabled = false
         binding.registerButton.visibility = View.GONE
         binding.loginButton.visibility = View.VISIBLE
-        showStatus("Device registered! Client ID: ${dcrManager.getClientId()}")
+        showStatus("Device registered! Client ID: $clientId")
     }
 
     private fun navigateToLogin() {
@@ -191,8 +192,7 @@ class WelcomeActivity : AppCompatActivity() {
     }
 
     private fun resetRegistration() {
-        dcrManager.resetRegistration()
-        oauth2Manager.logout()
+        d2.userModule().oauth2Handler().resetRegistration()
         
         Toast.makeText(this, "Registration reset complete", Toast.LENGTH_SHORT).show()
         
@@ -207,7 +207,7 @@ class WelcomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // Check if registration completed while in browser
-        if (dcrManager.isDeviceRegistered()) {
+        if (d2.userModule().oauth2Handler().isDeviceRegistered()) {
             showRegisteredState()
         }
     }

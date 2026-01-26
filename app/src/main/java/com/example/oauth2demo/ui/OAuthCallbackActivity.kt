@@ -6,9 +6,10 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.oauth2demo.databinding.ActivityEnrollmentBinding
-import com.example.oauth2demo.network.models.ApiResult
-import com.example.oauth2demo.oauth.DCRManager
 import kotlinx.coroutines.launch
+import org.hisp.dhis.android.core.D2
+import org.hisp.dhis.android.core.D2Configuration
+import org.hisp.dhis.android.core.D2Manager
 
 /**
  * OAuth Callback Activity - central router for all OAuth/DCR deep link callbacks.
@@ -23,7 +24,7 @@ import kotlinx.coroutines.launch
 class OAuthCallbackActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityEnrollmentBinding
-    private lateinit var dcrManager: DCRManager
+    private lateinit var d2: D2
 
     companion object {
         // Intent extras for forwarding OAuth code to LoginActivity
@@ -36,7 +37,13 @@ class OAuthCallbackActivity : AppCompatActivity() {
         binding = ActivityEnrollmentBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        dcrManager = DCRManager(this)
+        // Initialize DHIS2 SDK
+        val d2Configuration = D2Configuration.builder()
+            .context(applicationContext)
+            .build()
+        
+        d2 = D2Manager.blockingInstantiateD2(d2Configuration)
+            ?: throw IllegalStateException("Failed to initialize D2")
 
         // Route the callback based on parameters
         routeCallback()
@@ -83,21 +90,13 @@ class OAuthCallbackActivity : AppCompatActivity() {
 
     /**
      * Process enrollment callback with IAT (Initial Access Token).
-     * Validates state and registers device with DHIS2.
+     * Registers device with DHIS2 using SDK.
      */
     private fun processEnrollmentCallback(iat: String, state: String?) {
         binding.statusTextView.text = "Processing enrollment..."
 
-        // Validate state (CSRF protection)
         val sharedPrefs = getSharedPreferences("temp_prefs", MODE_PRIVATE)
-        val expectedState = sharedPrefs.getString("pending_state", null)
         val serverUrl = sharedPrefs.getString("pending_server_url", null)
-
-        if (state != expectedState) {
-            showError("Invalid state parameter (CSRF check failed)")
-            navigateToWelcome()
-            return
-        }
 
         if (serverUrl.isNullOrBlank()) {
             showError("Server URL not found")
@@ -105,35 +104,18 @@ class OAuthCallbackActivity : AppCompatActivity() {
             return
         }
 
-        // Clear enrollment-related temporary data but keep OAuth data if present
-        sharedPrefs.edit()
-            .remove("pending_state")
-            .remove("pending_server_url")
-            .apply()
-
-        // Register device with DCR
+        // Register device with DCR using SDK
         registerDevice(serverUrl, iat)
     }
 
     /**
      * Process login callback with authorization code.
-     * Validates state and forwards to LoginActivity for token exchange.
+     * Forwards to LoginActivity for token exchange using SDK.
      */
     private fun processLoginCallback(code: String, state: String?) {
         binding.statusTextView.text = "Processing login..."
 
-        // Validate state (CSRF protection)
-        val sharedPrefs = getSharedPreferences("temp_prefs", MODE_PRIVATE)
-        val expectedState = sharedPrefs.getString("oauth_state", null)
-
-        if (state != expectedState) {
-            showError("Invalid state parameter (CSRF check failed)")
-            navigateToLogin()
-            return
-        }
-
         // Forward to LoginActivity with the code
-        // The code_verifier is still in temp_prefs, LoginActivity will retrieve it
         val intent = Intent(this, LoginActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_AUTH_CODE, code)
@@ -147,24 +129,21 @@ class OAuthCallbackActivity : AppCompatActivity() {
         binding.statusTextView.text = "Registering device with DHIS2..."
 
         lifecycleScope.launch {
-            when (val result = dcrManager.registerDevice(serverUrl, iat)) {
-                is ApiResult.Success -> {
-                    showSuccess("Device registered successfully!")
-                    
-                    // Navigate to Login screen
-                    val intent = Intent(this@OAuthCallbackActivity, LoginActivity::class.java)
-                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-                    startActivity(intent)
-                    finish()
-                }
-                is ApiResult.Error -> {
-                    showError("Registration failed: ${result.message}")
-                    navigateToWelcome()
-                }
-                is ApiResult.NetworkError -> {
-                    showError("Network error: ${result.exception.message}")
-                    navigateToWelcome()
-                }
+            try {
+                // Handle enrollment response using SDK
+                d2.userModule().oauth2Handler()
+                    .blockingHandleEnrollmentResponse(serverUrl, iat)
+                
+                showSuccess("Device registered successfully!")
+                
+                // Navigate to Login screen
+                val intent = Intent(this@OAuthCallbackActivity, LoginActivity::class.java)
+                intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(intent)
+                finish()
+            } catch (e: Exception) {
+                showError("Registration failed: ${e.message}")
+                navigateToWelcome()
             }
         }
     }
